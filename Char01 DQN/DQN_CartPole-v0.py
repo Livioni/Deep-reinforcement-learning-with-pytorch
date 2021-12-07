@@ -14,7 +14,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Normal, Categorical
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 # Hyper-parameters
 seed = 1
@@ -50,7 +50,7 @@ class DQN():
 
     def __init__(self):
         super(DQN, self).__init__()
-        self.target_net, self.act_net = Net(), Net()
+        self.target_net, self.act_net = Net(), Net()#相同结构的网络
         self.memory = [None]*self.capacity
         self.optimizer = optim.Adam(self.act_net.parameters(), self.learning_rate)
         self.loss_func = nn.MSELoss()

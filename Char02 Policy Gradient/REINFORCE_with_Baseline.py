@@ -10,7 +10,7 @@ import torch.optim as optim
 from copy import deepcopy
 import argparse
 import matplotlib.pyplot as plt
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 from torch.nn.utils import clip_grad_norm_
 render = False
 

@@ -14,7 +14,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Normal, Categorical
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 # Parameters
 gamma = 0.99

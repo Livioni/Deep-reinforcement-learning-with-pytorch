@@ -6,19 +6,20 @@ import gym
 import matplotlib.pyplot as plt
 import copy
 
+#另外一种DQN写法
 # hyper-parameters
-BATCH_SIZE = 128
-LR = 0.01
-GAMMA = 0.90
-EPISILO = 0.9
-MEMORY_CAPACITY = 2000
-Q_NETWORK_ITERATION = 100
+BATCH_SIZE = 128 #批量更新数
+LR = 0.01       #学习率
+GAMMA = 0.90    #折扣率
+EPISILO = 0.9   #epsilon贪心率
+MEMORY_CAPACITY = 2000 #经验池大小
+Q_NETWORK_ITERATION = 100 #Q网络迭代次数
 
 env = gym.make("CartPole-v0")
 env = env.unwrapped
-NUM_ACTIONS = env.action_space.n
-NUM_STATES = env.observation_space.shape[0]
-ENV_A_SHAPE = 0 if isinstance(env.action_space.sample(), int) else env.action_space.sample.shape
+NUM_ACTIONS = env.action_space.n                            #动作空间数
+NUM_STATES = env.observation_space.shape[0]                 #状态空间数 
+ENV_A_SHAPE = 0 if isinstance(env.action_space.sample(), int) else env.action_space.sample.shape    
 
 class Net(nn.Module):
     """docstring for Net"""
@@ -43,11 +44,11 @@ class DQN():
     """docstring for DQN"""
     def __init__(self):
         super(DQN, self).__init__()
-        self.eval_net, self.target_net = Net(), Net()
+        self.eval_net, self.target_net = Net(), Net()  #初始化两个网络
 
-        self.learn_step_counter = 0
+        self.learn_step_counter = 0                     
         self.memory_counter = 0
-        self.memory = np.zeros((MEMORY_CAPACITY, NUM_STATES * 2 + 2))
+        self.memory = np.zeros((MEMORY_CAPACITY, NUM_STATES * 2 + 2)) #看下面注释
         # why the NUM_STATE*2 +2
         # When we store the memory, we put the state, action, reward and next_state in the memory
         # here reward and action is a number, state is a ndarray
@@ -58,7 +59,8 @@ class DQN():
         state = torch.unsqueeze(torch.FloatTensor(state), 0) # get a 1D array
         if np.random.randn() <= EPISILO:# greedy policy
             action_value = self.eval_net.forward(state)
-            action = torch.max(action_value, 1)[1].data.numpy()
+            a = torch.max(action_value, 1)
+            action = torch.max(action_value, 1)[1].data.numpy()#函数会返回两个tensor，第一个tensor是每行的最大值；第二个tensor是每行最大值的索引。
             action = action[0] if ENV_A_SHAPE == 0 else action.reshape(ENV_A_SHAPE)
         else: # random policy
             action = np.random.randint(0,NUM_ACTIONS)
@@ -69,14 +71,14 @@ class DQN():
     def store_transition(self, state, action, reward, next_state):
         transition = np.hstack((state, [action, reward], next_state))
         index = self.memory_counter % MEMORY_CAPACITY
-        self.memory[index, :] = transition
+        self.memory[index, :] = transition #替换np_array中的index行
         self.memory_counter += 1
 
 
     def learn(self):
 
         #update the parameters
-        if self.learn_step_counter % Q_NETWORK_ITERATION ==0:
+        if self.learn_step_counter % Q_NETWORK_ITERATION ==0: #每隔100次更新目标网络
             self.target_net.load_state_dict(self.eval_net.state_dict())
         self.learn_step_counter+=1
 
