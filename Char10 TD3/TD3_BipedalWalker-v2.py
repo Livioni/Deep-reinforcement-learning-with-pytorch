@@ -5,7 +5,7 @@ from itertools import count
 import os, sys, random
 import numpy as np
 
-import gym
+import gym,time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,7 +19,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--mode', default='train', type=str) # mode = 'train' or 'test'
 # OpenAI gym environment name, # ['BipedalWalker-v2', 'Pendulum-v0'] or any continuous environment
 # Note that if you want test in another game, you should fine-tuning.
-parser.add_argument("--env_name", default="BipedalWalker-v3")
+parser.add_argument("--env_name", default="BipedalWalkerHardcore-v3")
 parser.add_argument('--tau',  default=0.005, type=float) # target smoothing coefficient
 parser.add_argument('--target_update_interval', default=1, type=int)
 parser.add_argument('--test_iteration', default=10, type=int)
@@ -27,7 +27,7 @@ parser.add_argument('--test_iteration', default=10, type=int)
 parser.add_argument('--learning_rate', default=3e-4, type=float)
 parser.add_argument('--gamma', default=0.99, type=int) # discounted factor
 parser.add_argument('--capacity', default=50000, type=int) # replay buffer size
-parser.add_argument('--num_iteration', default=100000, type=int) #  num of  games
+parser.add_argument('--num_iteration', default=5000, type=int) #  num of  games
 parser.add_argument('--batch_size', default=100, type=int) # mini batch size
 parser.add_argument('--seed', default=False, type=bool)
 parser.add_argument('--random_seed', default=9527, type=int)
@@ -40,10 +40,11 @@ parser.add_argument('--load', default=False, type=bool) # load model
 parser.add_argument('--render_interval', default=100, type=int) # after render_interval, the env.render() will work
 parser.add_argument('--policy_noise', default=0.2, type=float)
 parser.add_argument('--noise_clip', default=0.5, type=float)
-parser.add_argument('--policy_delay', default=2, type=int)
+parser.add_argument('--policy_delay', default=2, type=int) #20/2 = 10 每个MBGD更新10次 
 parser.add_argument('--exploration_noise', default=0.1, type=float)
 parser.add_argument('--max_episode', default=2000, type=int)
 parser.add_argument('--print_log', default=5, type=int)
+parser.add_argument('--sleep_time', default=0.02, type=int)
 args = parser.parse_args()
 
 
@@ -57,10 +58,12 @@ if args.seed:
     torch.manual_seed(args.random_seed)
     np.random.seed(args.random_seed)
 
-state_dim = env.observation_space.shape[0]
-action_dim = env.action_space.shape[0]
-max_action = float(env.action_space.high[0])
+state_dim = env.observation_space.shape[0] #24维向量，包括各部件角速度，水平速度，垂直速度，关节位置，腿与地面的接触以及10个激光雷达测距仪的测量值
+action_dim = env.action_space.shape[0] #4维连续动作空间，取值范围为[-1,1]，分别对应机器人胯下两个关节的转矩以及膝关节的转矩
+max_action = float(env.action_space.high[0])#连续动作的上界
 min_Val = torch.tensor(1e-7).float().to(device) # min value
+#向前移动会获得到正奖励信号，摔倒会得到-100的奖励信号，同时，驱动各关节转动会得到一定的负奖励信号
+
 
 directory = './exp' + script_name + args.env_name +'./'
 '''
@@ -116,7 +119,7 @@ class Actor(nn.Module):
     def forward(self, state):
         a = F.relu(self.fc1(state))
         a = F.relu(self.fc2(a))
-        a = torch.tanh(self.fc3(a)) * self.max_action
+        a = torch.tanh(self.fc3(a)) * self.max_action 
         return a
 
 
@@ -134,38 +137,38 @@ class Critic(nn.Module):
 
         q = F.relu(self.fc1(state_action))
         q = F.relu(self.fc2(q))
-        q = self.fc3(q)
+        q = self.fc3(q)                     #输出的是该（状态-动作）的q值
         return q
 
 
 class TD3():
     def __init__(self, state_dim, action_dim, max_action):
 
-        self.actor = Actor(state_dim, action_dim, max_action).to(device)
-        self.actor_target = Actor(state_dim, action_dim, max_action).to(device)
-        self.critic_1 = Critic(state_dim, action_dim).to(device)
-        self.critic_1_target = Critic(state_dim, action_dim).to(device)
-        self.critic_2 = Critic(state_dim, action_dim).to(device)
-        self.critic_2_target = Critic(state_dim, action_dim).to(device)
+        self.actor = Actor(state_dim, action_dim, max_action).to(device)        #一个真实的行动家
+        self.actor_target = Actor(state_dim, action_dim, max_action).to(device) #行动家目标网络
+        self.critic_1 = Critic(state_dim, action_dim).to(device)                #评论家1
+        self.critic_1_target = Critic(state_dim, action_dim).to(device)         #评论家1目标网络
+        self.critic_2 = Critic(state_dim, action_dim).to(device)                #评论家2
+        self.critic_2_target = Critic(state_dim, action_dim).to(device)         #评论家目标网络2
 
         self.actor_optimizer = optim.Adam(self.actor.parameters())
         self.critic_1_optimizer = optim.Adam(self.critic_1.parameters())
         self.critic_2_optimizer = optim.Adam(self.critic_2.parameters())
 
-        self.actor_target.load_state_dict(self.actor.state_dict())
-        self.critic_1_target.load_state_dict(self.critic_1.state_dict())
-        self.critic_2_target.load_state_dict(self.critic_2.state_dict())
+        self.actor_target.load_state_dict(self.actor.state_dict())              #行动家目标网络参数和行动家网络参数相同
+        self.critic_1_target.load_state_dict(self.critic_1.state_dict())        #评论家1目标网络参数和评论家1参数相同
+        self.critic_2_target.load_state_dict(self.critic_2.state_dict())        #评论家2目标网络参数和评论家2参数相同
 
         self.max_action = max_action
         self.memory = Replay_buffer(args.capacity)
         self.writer = SummaryWriter(directory)
         self.num_critic_update_iteration = 0
         self.num_actor_update_iteration = 0
-        self.num_training = 0
+        self.num_training = 0                                                   #记录更新网络的次数
 
     def select_action(self, state):
         state = torch.tensor(state.reshape(1, -1)).float().to(device)
-        return self.actor(state).cpu().data.numpy().flatten()
+        return self.actor(state).cpu().data.numpy().flatten()                   #通过行动家选取网络
 
     def update(self, num_iteration):
 
@@ -173,8 +176,8 @@ class TD3():
             print("====================================")
             print("model has been trained for {} times...".format(self.num_training))
             print("====================================")
-        for i in range(num_iteration):
-            x, y, u, r, d = self.memory.sample(args.batch_size)
+        for i in range(num_iteration):                                          #只用update num_iteration次 原代码给的10  相当于做10次MBGD？
+            x, y, u, r, d = self.memory.sample(args.batch_size)                 #经验池中取batch_size这么多个轨迹
             state = torch.FloatTensor(x).to(device)
             action = torch.FloatTensor(u).to(device)
             next_state = torch.FloatTensor(y).to(device)
@@ -182,19 +185,19 @@ class TD3():
             reward = torch.FloatTensor(r).to(device)
 
             # Select next action according to target policy:
-            noise = torch.ones_like(action).data.normal_(0, args.policy_noise).to(device)
-            noise = noise.clamp(-args.noise_clip, args.noise_clip)
-            next_action = (self.actor_target(next_state) + noise)
-            next_action = next_action.clamp(-self.max_action, self.max_action)
+            noise = torch.ones_like(action).data.normal_(0, args.policy_noise).to(device) #构造action的噪声
+            noise = noise.clamp(-args.noise_clip, args.noise_clip)              #根据上下限截断noise
+            next_action = (self.actor_target(next_state) + noise)               #下一次行动就等于目标行动家网络输出的动作+噪声动作
+            next_action = next_action.clamp(-self.max_action, self.max_action)  #根据动作输出上下限截断动作
 
             # Compute target Q-value:
-            target_Q1 = self.critic_1_target(next_state, next_action)
-            target_Q2 = self.critic_2_target(next_state, next_action)
-            target_Q = torch.min(target_Q1, target_Q2)
-            target_Q = reward + ((1 - done) * args.gamma * target_Q).detach()
+            target_Q1 = self.critic_1_target(next_state, next_action)           #通过目标评论家1网络计算q值
+            target_Q2 = self.critic_2_target(next_state, next_action)           #通过目标评论家2网络计算q值
+            target_Q = torch.min(target_Q1, target_Q2)                          #取最小的一个Q值
+            target_Q = reward + ((1 - done) * args.gamma * target_Q).detach()   #计算target值
 
             # Optimize Critic 1:
-            current_Q1 = self.critic_1(state, action)
+            current_Q1 = self.critic_1(state, action)                           #真实值
             loss_Q1 = F.mse_loss(current_Q1, target_Q)
             self.critic_1_optimizer.zero_grad()
             loss_Q1.backward()
@@ -208,16 +211,18 @@ class TD3():
             loss_Q2.backward()
             self.critic_2_optimizer.step()
             self.writer.add_scalar('Loss/Q2_loss', loss_Q2, global_step=self.num_critic_update_iteration)
+
             # Delayed policy updates:
-            if i % args.policy_delay == 0:
+            if i % args.policy_delay == 0:                                      #延迟更新
                 # Compute actor loss:
-                actor_loss = - self.critic_1(state, self.actor(state)).mean()
+                actor_loss = - self.critic_1(state, self.actor(state)).mean()   #论文伪代码确实是这样写的
 
                 # Optimize the actor
                 self.actor_optimizer.zero_grad()
                 actor_loss.backward()
                 self.actor_optimizer.step()
                 self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
+                #软更新网络参数
                 for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                     target_param.data.copy_(((1- args.tau) * target_param.data) + args.tau * param.data)
 
@@ -267,6 +272,7 @@ def main():
                 next_state, reward, done, info = env.step(np.float32(action))
                 ep_r += reward
                 env.render()
+                time.sleep(args.sleep_time)
                 if done or t ==2000 :
                     print("Ep_i \t{}, the ep_r is \t{:0.2f}, the step is \t{}".format(i, ep_r, t))
                     ep_r = 0
@@ -279,25 +285,25 @@ def main():
         print("Collection Experience...")
         print("====================================")
         if args.load: agent.load()
-        for i in range(args.num_iteration):
+        for i in range(args.num_iteration):                                                                     #默认5000次
             state = env.reset()
             for t in range(2000):
 
-                action = agent.select_action(state)
-                action = action + np.random.normal(0, args.exploration_noise, size=env.action_space.shape[0])
-                action = action.clip(env.action_space.low, env.action_space.high)
-                next_state, reward, done, info = env.step(action)
-                ep_r += reward
-                if args.render and i >= args.render_interval : env.render()
-                agent.memory.push((state, next_state, action, reward, np.float(done)))
-                if i+1 % 10 == 0:
+                action = agent.select_action(state)                                                             #这里的action是通过行动家网络的出来的
+                action = action + np.random.normal(0, args.exploration_noise, size=env.action_space.shape[0])   #添加高斯噪声
+                action = action.clip(env.action_space.low, env.action_space.high)                               #截断动作区间   
+                next_state, reward, done, info = env.step(action)                                               #执行一个动作
+                ep_r += reward                                                                                  #记录累积收益值
+                if args.render and i >= args.render_interval : env.render()                                     #是否显示画面
+                agent.memory.push((state, next_state, action, reward, done))                                    #压入经验池
+                if i+1 % 10 == 0:                                                                               
                     print('Episode {},  The memory size is {} '.format(i, len(agent.memory.storage)))
-                if len(agent.memory.storage) >= args.capacity-1:
+                if len(agent.memory.storage) >= args.capacity-1:                                                #只有经验池装满后才开始更新
                     agent.update(10)
 
                 state = next_state
                 if done or t == args.max_episode -1:
-                    agent.writer.add_scalar('ep_r', ep_r, global_step=i)
+                    agent.writer.add_scalar('sum_reward', ep_r, global_step=i)
                     if i % args.print_log == 0:
                         print("Ep_i \t{}, the ep_r is \t{:0.2f}, the step is \t{}".format(i, ep_r, t))
                     ep_r = 0

@@ -109,7 +109,7 @@ class Actor(nn.Module):
     def forward(self, x):
         x = F.relu(self.l1(x))
         x = F.relu(self.l2(x))
-        x = self.max_action * torch.tanh(self.l3(x))
+        x = self.max_action * torch.tanh(self.l3(x)) #tanh输出[-1,1] max_action是输出的最大值，这里输出一个确定的动作
         return x
 
 
@@ -117,7 +117,7 @@ class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(Critic, self).__init__()
 
-        self.l1 = nn.Linear(state_dim + action_dim, 400)
+        self.l1 = nn.Linear(state_dim + action_dim, 400) #输入状态空间和动作空间 Q值网络
         self.l2 = nn.Linear(400 , 300)
         self.l3 = nn.Linear(300, 1)
 
